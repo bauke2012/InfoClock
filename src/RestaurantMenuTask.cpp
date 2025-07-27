@@ -40,7 +40,7 @@ FlashStream menuStatusPageFS(menuStatusPage);
 #define DISPLAY_PERIOD 0.025_s
 
 #define DEFAULT_MENU_START_HOUR 9
-#define DEFAULT_MENU_END_HOUR 17
+#define DEFAULT_MENU_END_HOUR 14
 
 namespace Tasks {
 
@@ -155,13 +155,13 @@ String RestaurantMenuTask::makeMenuDateString(time_t base) const {
 }
 
 void RestaurantMenuTask::updateMenuHoursFromConfig() {
-    int startHour = readConfigWithDefault(F("menuStartHour"), "9").toInt();
+    int startHour = readConfigWithDefault(F("menuStartHour"), String(DEFAULT_MENU_START_HOUR).c_str()).toInt();
     if (startHour >= 0 && startHour <= 23)
         menuStartHour = startHour;
     else
         menuStartHour = DEFAULT_MENU_START_HOUR;
 
-    int endHour = readConfigWithDefault(F("menuEndHour"), "17").toInt();
+    int endHour = readConfigWithDefault(F("menuEndHour"), String(DEFAULT_MENU_END_HOUR).c_str()).toInt();
     if (endHour >= 0 && endHour <= 23)
         menuEndHour = endHour;
     else

@@ -36,7 +36,7 @@ private:
     String novaeKey = "CER103";
 
     int menuStartHour = 9;
-    int menuEndHour = 17;
+    int menuEndHour = 14;
     bool menuShowTomorrow = false;
 
     String cachedMenuDate;
