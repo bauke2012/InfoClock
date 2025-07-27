@@ -130,6 +130,9 @@ static String trimmedKeyWords(const String& dish, int maxWords = 4) {
         word.replace(",", ""); word.replace(".", ""); word.replace(";", ""); 
         word.replace("/", " "); word.replace("&", ""); word.replace(":", "");
         word.replace("-", " "); word.replace("(", ""); word.replace(")", "");
+        word.replace("+", ""); word.replace("[", ""); word.replace("]", "");
+        word.replace("*", ""); word.replace("$", ""); word.replace("#", "");
+        word.replace("{", ""); word.replace("}", ""); word.replace("@", "");
         bool isStop = false;
         for (size_t j = 0; j < nStops; ++j)
             if (word.equalsIgnoreCase(stopwords[j])) { isStop = true; break; }
