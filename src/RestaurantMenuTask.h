@@ -12,6 +12,7 @@ namespace Tasks {
 class RestaurantMenuTask : public Task {
 public:
     RestaurantMenuTask();
+
     virtual void run() override;
     String getMenuString() const;
 
@@ -20,14 +21,17 @@ public:
 private:
     void fetchMenu(const String& dateStr);
     String makeMenuDateString(time_t base) const;
-    void updateMenuSwitchHourFromConfig();
+    void updateMenuHoursFromConfig();
+    bool isWithinDisplayHour() const;
 
     int restaurantCode = 1;
-    String restaurantId = "13-restaurant-r1";
+    String restaurantId = "33-restaurant-r3";
     String novaeKey = "CER103";
-    int menuSwitchHour = 14; // default 2PM, can be set in config
 
-    // Menu/caching state
+    int menuStartHour = 9;
+    int menuEndHour = 17;
+    bool menuShowTomorrow = false;
+
     String cachedMenuDate;
     String cachedMenuLine;
     String lastFetchedMenuDate;

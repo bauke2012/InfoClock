@@ -15,7 +15,9 @@ static const char menuStatusPage[] PROGMEM = R"_(
 <tr><th>Restaurant Menu</th></tr>
 <tr><td class="l">Last refresh:</td><td>$timestamp$</td></tr>
 <tr><td class="l">Restaurant:</td><td>$restaurant$</td></tr>
-<tr><td class="l">Switch hour:</td><td>$switchhour$</td></tr>
+<tr><td class="l">Menu start hour:</td><td>$menustarthour$</td></tr>
+<tr><td class="l">Menu end hour:</td><td>$menuendhour$</td></tr>
+<tr><td class="l">Show tomorrow:</td><td>$menushowtomorrow$</td></tr>
 <tr><td class="l">Menu date:</td><td>$menudate$</td></tr>
 <tr><td class="l">Menu:</td><td>$menu$</td></tr>
 </table>
@@ -30,15 +32,18 @@ FlashStream menuStatusPageFS(menuStatusPage);
 #define MENU_FETCH_INTERVAL_S 900_s
 #define DISPLAY_PERIOD 0.025_s
 
+#define DEFAULT_MENU_START_HOUR 9
+#define DEFAULT_MENU_END_HOUR 17
+
 namespace Tasks {
 
 static const struct {
     int code;
     const char* id;
 } restaurants[] = {
-    {3, "33-restaurant-r3"},
+    {1, "13-restaurant-r1"},
     {2, "21-restaurant-r2"},
-    {1, "13-restaurant-r1"}
+    {3, "33-restaurant-r3"}
 };
 static constexpr size_t NUM_RESTAURANTS = sizeof(restaurants) / sizeof(restaurants[0]);
 
@@ -106,15 +111,18 @@ String normalizeFrenchText(const String& in) {
     return out;
 }
 
-static String trimmedKeyWords(const String& dish, int maxWords = 3) {
-    const char* stopwords[] = { "aux","de","et","avec","à","le","la","du","des","en","au","sur","pour","les","un","une","d'","l'","with","and","of","in","for","the","to","on","at","from","by","an","a" };
+static String trimmedKeyWords(const String& dish, int maxWords = 4) {
+    const char* stopwords[] = { "aux","de","et","avec","à","le","la","du","des","en","au","sur","pour","les","un","une","deux","trois","quatre","d'","l'","with","and","of","in","for","the","to","on","at","from","by","an","a","one","two","three","four"};
     const size_t nStops = sizeof(stopwords) / sizeof(stopwords[0]);
     String out; int found = 0; size_t start = 0;
     while (found < maxWords && start < dish.length()) {
-        size_t end = dish.indexOf(' ', start); if (end == (size_t)-1)end = dish.length();
-        String word=dish.substring(start,end); word.trim();
-        word.replace(",", ""); word.replace(".", ""); word.replace(";", ""); word.replace("/", "");
-        word.replace(":", ""); word.replace("-", ""); word.replace("(", ""); word.replace(")", "");
+        size_t end = dish.indexOf(' ', start);
+        if (end == (size_t)-1) end = dish.length();
+        String word = dish.substring(start, end);
+        word.trim();
+        word.replace(",", ""); word.replace(".", ""); word.replace(";", ""); 
+        word.replace("/", ""); word.replace("&", ""); word.replace(":", "");
+        word.replace("-", ""); word.replace("(", ""); word.replace(")", "");
         bool isStop = false;
         for (size_t j = 0; j < nStops; ++j)
             if (word.equalsIgnoreCase(stopwords[j])) { isStop = true; break; }
@@ -136,27 +144,50 @@ String RestaurantMenuTask::makeMenuDateString(time_t base) const {
     return String(buf);
 }
 
-void RestaurantMenuTask::updateMenuSwitchHourFromConfig() {
-    int val = readConfig(F("menuSwitchHour")).toInt();
-    if (val >= 0 && val <= 23)
-        menuSwitchHour = val;
+void RestaurantMenuTask::updateMenuHoursFromConfig() {
+    int startHour = readConfigWithDefault(F("menuStartHour"), "9").toInt();
+    if (startHour >= 0 && startHour <= 23)
+        menuStartHour = startHour;
     else
-        menuSwitchHour = 14;
+        menuStartHour = DEFAULT_MENU_START_HOUR;
+
+    int endHour = readConfigWithDefault(F("menuEndHour"), "17").toInt();
+    if (endHour >= 0 && endHour <= 23)
+        menuEndHour = endHour;
+    else
+        menuEndHour = DEFAULT_MENU_END_HOUR;
+}
+
+bool RestaurantMenuTask::isWithinDisplayHour() const {
+    time_t now = time(nullptr);
+    struct tm* t = localtime(&now);
+    int hour = t->tm_hour;
+
+    if (menuStartHour < menuEndHour)
+        return hour >= menuStartHour && hour < menuEndHour;
+    else
+        return hour >= menuStartHour || hour < menuEndHour;
 }
 
 void RestaurantMenuTask::run() {
-    updateMenuSwitchHourFromConfig();
+    updateMenuHoursFromConfig();
 
-    int code = readConfig(F("restaurant")).toInt();
+    int code = readConfigWithDefault(F("restaurant"), "3").toInt();
     restaurantCode = codeSanitize(code);
     restaurantId = codeToId(restaurantCode);
+
+    menuShowTomorrow = readConfigWithDefault(F("menuShowTomorrow"), "0").toInt() == 1;
 
     time_t now = time(nullptr);
     struct tm* t = localtime(&now);
     int hour = t->tm_hour;
 
+    bool afterEnd;
+    if (menuStartHour < menuEndHour) afterEnd = (hour >= menuEndHour);
+    else afterEnd = (hour >= menuEndHour && hour < menuStartHour);
+
     String activeMenuDate;
-    if (hour >= menuSwitchHour) {
+    if (afterEnd && menuShowTomorrow) {
         now += 24 * 60 * 60;
     }
     activeMenuDate = makeMenuDateString(now);
@@ -179,7 +210,8 @@ void RestaurantMenuTask::fetchMenu(const String& dateStr) {
 
     WiFiClientSecure client; client.setInsecure();
     HTTPClient http;
-    http.begin(client, url); http.useHTTP10(true);
+    http.begin(client, url);
+    http.useHTTP10(true);
     http.addHeader("Novae-Codes", novaeKey);
     http.addHeader("Accept", "application/json");
     http.addHeader("X-Requested-With", "xmlhttprequest");
@@ -187,7 +219,10 @@ void RestaurantMenuTask::fetchMenu(const String& dateStr) {
     int httpCode = -1, attempts = 3;
     while (attempts-- && httpCode == -1) {
         httpCode = http.GET();
-        if (httpCode == -1) delay(2000);
+        if (httpCode == -1) {
+            logPrintfX(F("RMT"), F("Fetching Menu returned HTTP Error %d"), httpCode);
+            sleep(2_s);
+        }
     }
 
     if (httpCode == 200) {
@@ -223,7 +258,7 @@ void RestaurantMenuTask::fetchMenu(const String& dateStr) {
                 if (title.containsKey("en") && strlen(title["en"])) dish = String(title["en"].as<const char*>());
                 else if (title.containsKey("fr") && strlen(title["fr"])) dish = String(title["fr"].as<const char*>());
                 if (dish.length()) {
-                    String tmp = trimmedKeyWords(normalizeFrenchText(dish), 3);
+                    String tmp = trimmedKeyWords(normalizeFrenchText(dish), 4);
                     if (tmp.length() && seen.find(tmp) == seen.end()) {
                         seen.insert(tmp); 
                         dishes.push_back(tmp); 
@@ -240,14 +275,17 @@ void RestaurantMenuTask::fetchMenu(const String& dateStr) {
         }
 
         String allDishes;
-        for (auto& dish : dishes) {
-            if (!allDishes.isEmpty()) allDishes += " | ";
-            allDishes += dish;
+        if (dishes.empty()) {
+            cachedMenuLine = "";
+        } else {
+            String allDishes;
+            for (auto& dish : dishes) {
+                if (!allDishes.isEmpty()) allDishes += " | ";
+                allDishes += dish;
+            }
+            cachedMenuLine = allDishes;
         }
-        cachedMenuDate = dateStr;
-        cachedMenuLine = "R" + String(restaurantCode) + " menu: " + allDishes;
 
-        // Update status page timestamp
         lastStatusTimestamp = getDateTime();
     }
     http.end();
@@ -257,17 +295,33 @@ String RestaurantMenuTask::getMenuString() const {
     time_t now = time(nullptr);
     struct tm* t = localtime(&now);
     int hour = t->tm_hour;
-    time_t wantTime = now;
+
+    bool afterEnd;
+    if (menuStartHour < menuEndHour)
+        afterEnd = (hour >= menuEndHour);
+    else
+        afterEnd = (hour >= menuEndHour && hour < menuStartHour);
+
+    bool withinWindow = isWithinDisplayHour();
     bool showTomorrow = false;
-    if (hour >= menuSwitchHour) {
-        wantTime += 24 * 60 * 60;
+
+    if (withinWindow) {
+    } else if (afterEnd && menuShowTomorrow) {
+        now += 24 * 60 * 60;
         showTomorrow = true;
+    } else {
+        return "";
     }
-    String wantedDate = makeMenuDateString(wantTime);
-    if (cachedMenuDate != wantedDate || cachedMenuLine.isEmpty())
-        return "[menu?]";
+
+    String wantedDate = makeMenuDateString(now);
+    if (cachedMenuDate != wantedDate || cachedMenuLine.isEmpty()) {
+        return "";
+    }
+
     String labelPrefix = showTomorrow ? "Tomorrow's " : "Today's ";
-    return labelPrefix + cachedMenuLine;
+    String menuPrefix = "R" + String(restaurantCode) + " menu: ";
+
+    return labelPrefix + menuPrefix + cachedMenuLine;
 }
 
 void RestaurantMenuTask::handleStatusPage(ESP8266WebServer& webServer) {
@@ -277,7 +331,9 @@ void RestaurantMenuTask::handleStatusPage(ESP8266WebServer& webServer) {
     std::map<String, String> m = {
         {F("timestamp"), lastStatusTimestamp},
         {F("restaurant"), restaurantId},
-        {F("switchhour"), String(menuSwitchHour)},
+        {F("menustarthour"), String(menuStartHour)},
+        {F("menuendhour"), String(menuEndHour)},
+        {F("menushowtomorrow"), menuShowTomorrow ? "1" : "0"},
         {F("menudate"), cachedMenuDate},
         {F("menu"), cachedMenuLine}
     };
