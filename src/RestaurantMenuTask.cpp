@@ -1,3 +1,10 @@
+/*
+ * RestaurantMenuTask.cpp
+ *
+ *  Created on: 27.07.2025
+ *      Author: Bauke Spoelstra
+ */
+
 #include "RestaurantMenuTask.h"
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
