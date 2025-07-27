@@ -112,7 +112,7 @@ String normalizeFrenchText(const String& in) {
 }
 
 static String trimmedKeyWords(const String& dish, int maxWords = 4) {
-    const char* stopwords[] = { "aux","de","et","avec","à","le","la","du","des","en","au","sur","pour","les","un","une","deux","trois","quatre","d'","l'","with","and","of","in","for","the","to","on","at","from","by","an","a","one","two","three","four"};
+    const char* stopwords[] = { "aux","de","et","avec","à","le","la","du","des","en","au","sur","pour","les","un","une","deux","trois","quatre","d'","l'","with","and","of","in","for","the","to","on","at","from","by","an","a","one","two","three","four", "fresh", "old fashioned", "organic", "mature", "traditional", "natural", "style", "sliced", "drenched"};
     const size_t nStops = sizeof(stopwords) / sizeof(stopwords[0]);
     String out; int found = 0; size_t start = 0;
     while (found < maxWords && start < dish.length()) {
@@ -121,8 +121,8 @@ static String trimmedKeyWords(const String& dish, int maxWords = 4) {
         String word = dish.substring(start, end);
         word.trim();
         word.replace(",", ""); word.replace(".", ""); word.replace(";", ""); 
-        word.replace("/", ""); word.replace("&", ""); word.replace(":", "");
-        word.replace("-", ""); word.replace("(", ""); word.replace(")", "");
+        word.replace("/", " "); word.replace("&", ""); word.replace(":", "");
+        word.replace("-", " "); word.replace("(", ""); word.replace(")", "");
         bool isStop = false;
         for (size_t j = 0; j < nStops; ++j)
             if (word.equalsIgnoreCase(stopwords[j])) { isStop = true; break; }
@@ -204,6 +204,7 @@ void RestaurantMenuTask::run() {
 }
 
 void RestaurantMenuTask::fetchMenu(const String& dateStr) {
+    logPrintfX(F("RMT"), F("Starting fetchMenu for date: %s restaurant: %s"), dateStr.c_str(), restaurantId.c_str());
     dishes.clear();
     std::set<String> seen;
     String url = "https://api.mynovae.ch/en/api/v2/salepoints/" + restaurantId + "/menus/" + dateStr;
@@ -260,8 +261,9 @@ void RestaurantMenuTask::fetchMenu(const String& dateStr) {
                 if (dish.length()) {
                     String tmp = trimmedKeyWords(normalizeFrenchText(dish), 4);
                     if (tmp.length() && seen.find(tmp) == seen.end()) {
-                        seen.insert(tmp); 
-                        dishes.push_back(tmp); 
+                        seen.insert(tmp);
+                        dishes.push_back(tmp);
+                        logPrintfX(F("RMT"), F("Added dish: %s"), tmp.c_str());
                     }
                 }
             } else {
@@ -274,9 +276,12 @@ void RestaurantMenuTask::fetchMenu(const String& dateStr) {
             }
         }
 
+        logPrintfX(F("RMT"), F("Fetch menu completed"));
+
         String allDishes;
         if (dishes.empty()) {
             cachedMenuLine = "";
+            logPrintfX(F("RMT"), F("No dishes found for date %s"), dateStr.c_str());
         } else {
             String allDishes;
             for (auto& dish : dishes) {
@@ -284,9 +289,12 @@ void RestaurantMenuTask::fetchMenu(const String& dateStr) {
                 allDishes += dish;
             }
             cachedMenuLine = allDishes;
+            cachedMenuDate = dateStr;
         }
 
         lastStatusTimestamp = getDateTime();
+    } else {
+        logPrintfX(F("RMT"), F("HTTP GET failed with code %d, no menu fetched"), httpCode);
     }
     http.end();
 }
@@ -310,11 +318,13 @@ String RestaurantMenuTask::getMenuString() const {
         now += 24 * 60 * 60;
         showTomorrow = true;
     } else {
+        logPrintfX(F("RMT"), F("No menu displaying at this time"));
         return "";
     }
 
     String wantedDate = makeMenuDateString(now);
     if (cachedMenuDate != wantedDate || cachedMenuLine.isEmpty()) {
+    logPrintfX(F("RMT"), F("No menu available for date: %s"), wantedDate.c_str());
         return "";
     }
 
@@ -334,7 +344,7 @@ void RestaurantMenuTask::handleStatusPage(ESP8266WebServer& webServer) {
         {F("menustarthour"), String(menuStartHour)},
         {F("menuendhour"), String(menuEndHour)},
         {F("menushowtomorrow"), menuShowTomorrow ? "1" : "0"},
-        {F("menudate"), cachedMenuDate},
+        {F("menudate"), cachedMenuDate.c_str()},
         {F("menu"), cachedMenuLine}
     };
 
